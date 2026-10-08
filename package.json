@@ -1,0 +1,51 @@
+{
+  "name": "43030-aws-serverless-genai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Secure AWS serverless generative AI request service built with CDK, Lambda, API Gateway, DynamoDB and Amazon Bedrock",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "jest --runInBand",
+    "test:coverage": "jest --coverage --runInBand",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "destroy": "cdk destroy",
+    "verify": "npm run lint && npm run typecheck && npm test && cdk synth --quiet",
+    "evaluate": "ts-node evaluation/run-evaluation.ts",
+    "evaluate:mock": "ts-node evaluation/run-evaluation.ts --mode mock"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "^3.942.0",
+    "@aws-sdk/client-dynamodb": "^3.942.0",
+    "@aws-sdk/lib-dynamodb": "^3.942.0",
+    "aws-cdk-lib": "^2.272.0",
+    "constructs": "^10.4.2"
+  },
+  "devDependencies": {
+    "@aws-crypto/sha256-js": "^5.2.0",
+    "@aws-sdk/credential-providers": "^3.1147.0",
+    "@eslint/js": "^9.39.0",
+    "@smithy/protocol-http": "^5.6.2",
+    "@smithy/signature-v4": "^5.7.4",
+    "@types/aws-lambda": "^8.10.158",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.19.0",
+    "aws-cdk": "2.1145.0",
+    "aws-sdk-client-mock": "^4.1.0",
+    "esbuild": "^0.28.2",
+    "eslint": "^9.39.0",
+    "jest": "^30.5.2",
+    "ts-jest": "^29.4.14",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.71.1"
+  }
+}

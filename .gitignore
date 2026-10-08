@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.js
+!jest.config.js
+*.d.ts
+*.js.map
+
+# CDK
+cdk.out/
+cdk.context.json
+.cdk.staging/
+cdk-outputs.json
+
+# Test / coverage
+coverage/
+.jest-cache/
+
+# Local evidence output may contain account-specific identifiers (account IDs,
+# API endpoints, ARNs) and is therefore never committed.
+evidence/
+
+# Environment and credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
