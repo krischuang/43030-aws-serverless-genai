@@ -1,0 +1,66 @@
+name: validate
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint, type-check, test and synth
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies from the lock file
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Unit and infrastructure tests
+        run: npm test
+
+      # Synthesis uses placeholder environment values so that no AWS
+      # credentials are required to prove the stack is valid CloudFormation.
+      - name: CDK synth
+        run: npx cdk synth --quiet
+        env:
+          CDK_DEFAULT_ACCOUNT: '000000000000'
+          CDK_DEFAULT_REGION: ap-southeast-2
+
+      - name: Evaluation suite (mock transport)
+        run: npm run evaluate:mock
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-report-mock
+          path: evidence/evaluation-mock.*
+          if-no-files-found: warn
+          retention-days: 14

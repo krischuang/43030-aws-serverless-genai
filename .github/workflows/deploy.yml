@@ -1,0 +1,89 @@
+name: deploy
+
+# Deployment is manual on purpose. A generative AI endpoint that redeploys on
+# every commit would make cost and model behaviour unpredictable, so this
+# workflow only ever runs when a human dispatches it.
+on:
+  workflow_dispatch:
+    inputs:
+      environment_name:
+        description: Stage/environment name to deploy (becomes the API stage)
+        required: true
+        default: dev
+      aws_region:
+        description: AWS region to deploy into
+        required: true
+        default: ap-southeast-2
+      bedrock_model_id:
+        description: Bedrock model or inference profile id
+        required: true
+        default: apac.amazon.nova-micro-v1:0
+      confirm:
+        description: Type "deploy" to confirm
+        required: true
+        default: ''
+
+permissions:
+  contents: read
+  # Required for GitHub's OIDC provider to mint a short-lived token that is
+  # exchanged for AWS credentials. No long-lived AWS access keys are stored in
+  # this repository.
+  id-token: write
+
+jobs:
+  deploy:
+    name: CDK deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment_name }}
+
+    steps:
+      - name: Verify the confirmation input
+        if: inputs.confirm != 'deploy'
+        run: |
+          echo 'Confirmation input must be the literal string "deploy".' >&2
+          exit 1
+
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies from the lock file
+        run: npm ci
+
+      - name: Re-run validation before deploying
+        run: |
+          npm run lint
+          npm run typecheck
+          npm test
+
+      # Requires repository variable AWS_DEPLOY_ROLE_ARN pointing at an IAM
+      # role that trusts token.actions.githubusercontent.com for this
+      # repository. See docs/security.md for the trust policy.
+      - name: Assume the deployment role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: github-actions-serverless-genai
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Show the planned change set
+        run: >-
+          npx cdk diff
+          -c environmentName=${{ inputs.environment_name }}
+          -c bedrockModelId=${{ inputs.bedrock_model_id }}
+
+      - name: Deploy
+        run: >-
+          npx cdk deploy --require-approval never
+          -c environmentName=${{ inputs.environment_name }}
+          -c bedrockModelId=${{ inputs.bedrock_model_id }}
+          --outputs-file cdk-outputs.json
+
+      - name: Report the deployed outputs
+        run: node -e "const o=require('./cdk-outputs.json');for(const s of Object.values(o)){console.log('ApiBaseUrl:',s.ApiBaseUrl);console.log('BedrockModelId:',s.BedrockModelId);console.log('BedrockMode:',s.BedrockMode)}"
