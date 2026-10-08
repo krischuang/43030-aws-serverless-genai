@@ -66,7 +66,7 @@ jobs:
       # role that trusts token.actions.githubusercontent.com for this
       # repository. See docs/security.md for the trust policy.
       - name: Assume the deployment role via OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: github-actions-serverless-genai
