@@ -221,9 +221,20 @@ npx cdk synth -c environmentName=staging -c bedrockModelId=amazon.nova-lite-v1:0
 ## 8. Testing
 
 ```bash
-npm test                # 155 tests across 8 suites
+npm test                # 173 tests across 10 suites (155 original + 18 local-DynamoDB)
 npm run test:coverage   # with a coverage report in coverage/
 ```
+
+The 155 tests in the 8 suites below mock both Bedrock and DynamoDB
+(`aws-sdk-client-mock`) — zero AWS cost, zero containers required. Two additional
+suites, `test/local-integration.test.ts` and `test/local-security.test.ts`, run the same
+handler code against a **real** local DynamoDB engine (the official
+`amazon/dynamodb-local` Docker image) instead of a mock, to prove the actual DynamoDB
+wire calls — not just the application logic around them — are well-formed. They
+auto-skip (not fail) if Docker/DynamoDB Local isn't running. See
+[`docs/local-validation-guide.md`](docs/local-validation-guide.md) for setup
+(`npm run dynamodb:local:up`) and [`docs/local-evaluation-report.md`](docs/local-evaluation-report.md)
+for the full Pass/Fail/Skip breakdown.
 
 What is covered:
 
@@ -250,7 +261,11 @@ What is covered:
   resource type.
 - **Evaluation harness** — suite well-formedness and the scorer's own pass/fail/skip logic.
 
-No test makes a live AWS call; the AWS SDK is stubbed with `aws-sdk-client-mock`.
+No test makes a live AWS call. The 155 original tests stub the AWS SDK entirely with
+`aws-sdk-client-mock`; the local-DynamoDB suite instead points the AWS SDK at a local
+container via `AWS_ENDPOINT_URL_DYNAMODB` with obviously-fake credentials, with a
+reachability guard so it skips cleanly rather than ever attempting to reach a real AWS
+endpoint — see `docs/local-validation-guide.md` §"Safety design" for the full mechanism.
 
 ## 9. CDK deployment
 
@@ -583,3 +598,7 @@ The full reflection is in `docs/professional-reflection.md`.
 | `docs/evaluation.md` | Evaluation method, dimensions, sample report, verification status |
 | `docs/evidence-guide.md` | E1–E15: exactly what to capture for the UTS portfolio |
 | `docs/professional-reflection.md` | Professional learning reflection |
+| `docs/deployment-readiness.md` | Pre-deployment checklist: IAM, Bedrock/Guardrail prerequisites, cost, rollback, diagnosed credential blocker |
+| `docs/uts-a3-goal4-evidence.md` | Per-requirement A1 Goal 4 evidence matrix (two review passes: deployment-readiness, then zero-cost local validation) |
+| `docs/local-validation-guide.md` | How to reproduce every test locally with zero AWS cost, including the DynamoDB Local setup and its safety design |
+| `docs/local-evaluation-report.md` | Pass/Fail/Skip evaluation summary produced entirely without a real AWS account |

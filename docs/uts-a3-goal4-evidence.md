@@ -11,7 +11,43 @@ All checks below (lint, typecheck, 155-test suite, `cdk synth`, mock evaluation,
 GitHub Actions run history) were run or inspected during this review on 2026-11-01.
 No AWS API calls were made and no AWS resources were created or modified.
 
-## Evidence Matrix
+## A1 Requirement Coverage Matrix (Zero-Cost Local Validation pass)
+
+A second review pass, same day, added a real local `amazon/dynamodb-local` Docker
+container and 18 new tests (`test/local-integration.test.ts`,
+`test/local-security.test.ts`) to close a specific gap the first pass left open: the
+original 155 tests mock DynamoDB entirely, which proves application logic but not that
+the actual DynamoDB wire calls are well-formed. Full detail:
+`docs/local-validation-guide.md`, `docs/local-evaluation-report.md`.
+
+This table uses the five-value status vocabulary requested for this pass —
+**IMPLEMENTED**, **LOCALLY VERIFIED** (proven against a real local engine — DynamoDB
+Local), **MOCK VERIFIED** (proven against an in-memory stub only), **NOT VERIFIED**, or
+**NOT APPLICABLE**. No AWS account, AWS credentials, or real Bedrock call was used
+anywhere in this pass, consistent with every other document in this repository.
+
+| A1 Requirement | Implementation | Local Test | Evidence | Limitation |
+|---|---|---|---|---|
+| AWS Serverless Architecture | `lib/serverless-genai-stack.ts` | MOCK VERIFIED | `cdk synth` (20 resource types), `test/infrastructure.test.ts` | No live deployment; serverless runtime behaviour (cold start, scaling) unobserved |
+| AWS CDK (TypeScript) | `bin/app.ts`, `lib/*.ts` | LOCALLY VERIFIED | `npm run lint`/`typecheck` clean, `cdk synth` fully offline (dummy account/region) | `cdk bootstrap`/`cdk deploy` never run (out of scope for this pass by instruction) |
+| AWS Lambda | `src/handlers/generate.ts`, `get-request.ts` | LOCALLY VERIFIED | `test/local-integration.test.ts` — real end-to-end invocation with real DynamoDB persistence, not just a mock | Handler function invoked directly in Node, not inside a real Lambda execution sandbox (no cold start, no actual ARM64/memory/timeout enforcement) |
+| Amazon API Gateway | `RestApi`, `AWS_IAM` auth, validator, throttle | MOCK VERIFIED | `test/infrastructure.test.ts` asserts the synthesised config | API Gateway itself was never exercised, locally or otherwise — every test in this repo invokes the Lambda handler directly, which is a different surface from going through real/emulated API Gateway routing, SigV4 enforcement, and throttling |
+| Amazon DynamoDB | On-demand table, TTL, least-privilege grants | **LOCALLY VERIFIED** | `test/local-integration.test.ts`, `test/local-security.test.ts` — real `PutCommand`/`GetCommand`, real `ConditionExpression` enforcement, real `ResourceNotFoundException` | DynamoDB Local doesn't meter capacity and isn't a byte-identical clone (no Global Tables/DAX); real managed-service latency/availability still NOT VERIFIED |
+| Amazon Bedrock Integration | `src/shared/bedrock.ts` Converse API | MOCK VERIFIED | `test/local-security.test.ts` (timeout shape), `test/generate-handler.test.ts` | NOT VERIFIED: no real Converse API call has ever been made in any review pass |
+| Bedrock Guardrails / AI Safety | `CfnGuardrail` content + PII policy | MOCK VERIFIED (response-shape handling only) | `test/local-security.test.ts` "simulates a guardrail block" | Real guardrail decision (would a given prompt actually be blocked/anonymised) is NOT VERIFIED — requires a live call |
+| IAM Least Privilege | `lib/bedrock-permissions.ts`, single-action grants | MOCK VERIFIED | `test/infrastructure.test.ts` asserts the synthesised policy document | Synthesised policy only — NOT VERIFIED that this is what's actually enforced by a deployed, attached role |
+| LLM Evaluation — Relevance | `evaluation/scorer.ts` | NOT VERIFIED | `evaluate:mock` — 5 `skipped` | No real model output exists in any local mode to judge |
+| LLM Evaluation — Groundedness | — | **NOT APPLICABLE / NOT IMPLEMENTED** | `evaluation/types.ts:3` — `Dimension` has no groundedness member | Not implemented in the harness; architecturally this service has no retrieval/context source to ground a response against |
+| LLM Evaluation — Prompt Injection | `evaluation/cases.json` C09/C10, `validation.ts` | **LOCALLY VERIFIED** (app layer) | `test/local-security.test.ts` — flag confirmed on the real persisted DynamoDB item | Confirms app-layer flagging only; does not confirm the model/guardrail itself declines |
+| LLM Evaluation — Sensitive Data Handling | `evaluation/cases.json` C11, `validation.ts` | **LOCALLY VERIFIED** (app layer) | `test/local-security.test.ts` | Same caveat as Prompt Injection |
+| LLM Evaluation — Latency (real model) | `evaluation/scorer.ts scoreLatency` | NOT VERIFIED | `evaluate:mock` — 8 `skipped`; 0–7ms mock figures explicitly not presented as real | No real model call made |
+| LLM Evaluation — Failure Behaviour | `evaluation/scorer.ts scoreOutcome` | **LOCALLY VERIFIED** | `test/local-security.test.ts` (whole file), `evaluate:mock` C05–C08/C13 | None of real significance — this dimension is now well-covered without any deployment |
+| LLM Evaluation — Guardrail Behaviour | `generate.ts` `ContentBlockedError` handling | MOCK VERIFIED (app layer, now against real persistence) | `test/local-security.test.ts` | The actual guardrail-triggering decision remains NOT VERIFIED locally |
+| CloudWatch / Observability | `logger.ts`, `CfnAlarm`/`Dashboard`, X-Ray `ACTIVE` | MOCK VERIFIED (config only) | `test/observability.test.ts`, `cdk synth` | NOT VERIFIED: no real CloudWatch log, metric, or trace was ever produced — there is no local CloudWatch emulator in use. Also note: this is AWS-native CloudWatch + X-Ray, not OpenTelemetry SDK instrumentation |
+| Automated Tests & CI/CD | Jest, 10 suites (8 original + 2 new) | **LOCALLY VERIFIED** | `npm test` — 173 tests, 171 passed, 2 documented skips | CI itself (`.github/workflows/validate.yml`) was not re-triggered this pass (no push made); its real green run history was confirmed in the prior deployment-readiness review |
+| Architecture Documentation & Portfolio Evidence | `docs/*.md` (3 new this pass) | NOT APPLICABLE (not code) | This file, `docs/local-validation-guide.md`, `docs/local-evaluation-report.md` | None |
+
+## Evidence Matrix (original pass, 2026-11-01 — deployment-readiness review)
 
 | A1 Requirement | Implementation | Test Evidence | Deployment Status | Remaining Gap |
 |---|---|---|---|---|
