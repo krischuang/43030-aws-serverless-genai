@@ -20,7 +20,10 @@
     "destroy": "cdk destroy",
     "verify": "npm run lint && npm run typecheck && npm test && cdk synth --quiet",
     "evaluate": "ts-node evaluation/run-evaluation.ts",
-    "evaluate:mock": "ts-node evaluation/run-evaluation.ts --mode mock"
+    "evaluate:mock": "ts-node evaluation/run-evaluation.ts --mode mock",
+    "dynamodb:local:up": "docker run -d --rm --name dynamodb-local-uts-a3 -p 8000:8000 amazon/dynamodb-local:latest -jar DynamoDBLocal.jar -sharedDb -inMemory",
+    "dynamodb:local:down": "docker stop dynamodb-local-uts-a3",
+    "test:local": "jest --runInBand test/local-integration.test.ts test/local-security.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.942.0",
