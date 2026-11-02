@@ -13,39 +13,199 @@ No AWS API calls were made and no AWS resources were created or modified.
 
 ## A1 Requirement Coverage Matrix (Zero-Cost Local Validation pass)
 
-A second review pass, same day, added a real local `amazon/dynamodb-local` Docker
+A second review pass, 2026-11-01, added a real local `amazon/dynamodb-local` Docker
 container and 18 new tests (`test/local-integration.test.ts`,
 `test/local-security.test.ts`) to close a specific gap the first pass left open: the
 original 155 tests mock DynamoDB entirely, which proves application logic but not that
 the actual DynamoDB wire calls are well-formed. Full detail:
 `docs/local-validation-guide.md`, `docs/local-evaluation-report.md`.
 
+**Correction note (2026-11-02, final P4 evidence review):** the table below was revised
+in this third pass so that every status label is unambiguous *on its own*, without
+requiring a reader to open the Limitation column to avoid overclaiming. In particular:
+Lambda/API Gateway/IAM/CloudWatch rows now state in the status itself that synthesised
+config or direct-handler-invocation is not the same as real cloud execution; Mock
+Bedrock/Guardrail rows now state in the status itself that app-layer response-shape
+handling is not proof of real model quality or real server-side filtering; Groundedness
+is corrected from "NOT APPLICABLE / NOT IMPLEMENTED" to **NOT EVALUATED** (it *was* one
+of the dimensions A1 planned to assess — the correct classification is that it was never
+evaluated, not that it was inapplicable); and Architecture Documentation is corrected
+from "NOT APPLICABLE" to **IMPLEMENTED**, since the documentation *is* the evidence for
+that requirement, not something the requirement doesn't apply to. The "Automated Tests &
+CI/CD" row is also corrected: see the new "CI Verification" section below for what was
+actually found when this was checked properly (CI never ran on this branch at all, for a
+more specific reason than "no push was made").
+
 This table uses the five-value status vocabulary requested for this pass —
 **IMPLEMENTED**, **LOCALLY VERIFIED** (proven against a real local engine — DynamoDB
-Local), **MOCK VERIFIED** (proven against an in-memory stub only), **NOT VERIFIED**, or
-**NOT APPLICABLE**. No AWS account, AWS credentials, or real Bedrock call was used
-anywhere in this pass, consistent with every other document in this repository.
+Local), **MOCK VERIFIED** (proven against an in-memory stub only), **NOT VERIFIED**,
+**NOT EVALUATED**, or **NOT APPLICABLE**. No AWS account, AWS credentials, or real
+Bedrock call was used anywhere in this pass, consistent with every other document in
+this repository.
 
 | A1 Requirement | Implementation | Local Test | Evidence | Limitation |
 |---|---|---|---|---|
-| AWS Serverless Architecture | `lib/serverless-genai-stack.ts` | MOCK VERIFIED | `cdk synth` (20 resource types), `test/infrastructure.test.ts` | No live deployment; serverless runtime behaviour (cold start, scaling) unobserved |
-| AWS CDK (TypeScript) | `bin/app.ts`, `lib/*.ts` | LOCALLY VERIFIED | `npm run lint`/`typecheck` clean, `cdk synth` fully offline (dummy account/region) | `cdk bootstrap`/`cdk deploy` never run (out of scope for this pass by instruction) |
-| AWS Lambda | `src/handlers/generate.ts`, `get-request.ts` | LOCALLY VERIFIED | `test/local-integration.test.ts` — real end-to-end invocation with real DynamoDB persistence, not just a mock | Handler function invoked directly in Node, not inside a real Lambda execution sandbox (no cold start, no actual ARM64/memory/timeout enforcement) |
-| Amazon API Gateway | `RestApi`, `AWS_IAM` auth, validator, throttle | MOCK VERIFIED | `test/infrastructure.test.ts` asserts the synthesised config | API Gateway itself was never exercised, locally or otherwise — every test in this repo invokes the Lambda handler directly, which is a different surface from going through real/emulated API Gateway routing, SigV4 enforcement, and throttling |
-| Amazon DynamoDB | On-demand table, TTL, least-privilege grants | **LOCALLY VERIFIED** | `test/local-integration.test.ts`, `test/local-security.test.ts` — real `PutCommand`/`GetCommand`, real `ConditionExpression` enforcement, real `ResourceNotFoundException` | DynamoDB Local doesn't meter capacity and isn't a byte-identical clone (no Global Tables/DAX); real managed-service latency/availability still NOT VERIFIED |
-| Amazon Bedrock Integration | `src/shared/bedrock.ts` Converse API | MOCK VERIFIED | `test/local-security.test.ts` (timeout shape), `test/generate-handler.test.ts` | NOT VERIFIED: no real Converse API call has ever been made in any review pass |
-| Bedrock Guardrails / AI Safety | `CfnGuardrail` content + PII policy | MOCK VERIFIED (response-shape handling only) | `test/local-security.test.ts` "simulates a guardrail block" | Real guardrail decision (would a given prompt actually be blocked/anonymised) is NOT VERIFIED — requires a live call |
-| IAM Least Privilege | `lib/bedrock-permissions.ts`, single-action grants | MOCK VERIFIED | `test/infrastructure.test.ts` asserts the synthesised policy document | Synthesised policy only — NOT VERIFIED that this is what's actually enforced by a deployed, attached role |
+| AWS Serverless Architecture | `lib/serverless-genai-stack.ts` | MOCK VERIFIED (synthesised template only — not executed in any cloud) | `cdk synth` (20 resource types), `test/infrastructure.test.ts` | No live deployment; serverless runtime behaviour (cold start, scaling) unobserved |
+| AWS CDK (TypeScript) | `bin/app.ts`, `lib/*.ts` | LOCALLY VERIFIED (lint, typecheck, offline synth) | `npm run lint`/`typecheck` clean, `cdk synth` fully offline (dummy account/region) | `cdk bootstrap`/`cdk deploy` never run (out of scope for this review by instruction) |
+| AWS Lambda | `src/handlers/generate.ts`, `get-request.ts` | LOCALLY VERIFIED (handler logic only — **not** a real Lambda runtime) | `test/local-integration.test.ts` — real end-to-end invocation with real DynamoDB persistence, not just a mock | The exported `handler` function is called directly in a local Node process. No real Lambda execution environment was ever used: no cold start, no AWS Lambda ARM64 sandbox, no enforced memory/timeout ceiling |
+| Amazon API Gateway | `RestApi`, `AWS_IAM` auth, validator, throttle | MOCK VERIFIED (synthesised config only — API Gateway itself never executed, locally or in the cloud) | `test/infrastructure.test.ts` asserts the synthesised config | Every test in this repo invokes the Lambda handler directly. API Gateway's actual routing, SigV4 authorisation enforcement, request validation, and throttling have never been exercised in any form, local or cloud |
+| Amazon DynamoDB | On-demand table, TTL, least-privilege grants | **LOCALLY VERIFIED (real local DynamoDB engine — NOT AWS Cloud DynamoDB)** | `test/local-integration.test.ts`, `test/local-security.test.ts` — real `PutCommand`/`GetCommand`, real `ConditionExpression` enforcement, real `ResourceNotFoundException` | `amazon/dynamodb-local` is AWS's own local engine, not AWS Cloud DynamoDB — it doesn't meter capacity, bill, or replicate, and isn't a byte-identical clone (no Global Tables/DAX). Real managed-service latency, availability, and billing behaviour remain NOT VERIFIED |
+| Amazon Bedrock Integration | `src/shared/bedrock.ts` Converse API | MOCK VERIFIED (response-shape handling only — does **not** prove real model quality or availability) | `test/local-security.test.ts` (timeout shape), `test/generate-handler.test.ts` | NOT VERIFIED: no real Converse API call has ever been made in any review pass. Nothing here demonstrates what the real model would actually say, how fast, or whether the configured model id is even enabled in any account |
+| Bedrock Guardrails / AI Safety | `CfnGuardrail` content + PII policy | MOCK VERIFIED (app-layer handling of a simulated blocked-response shape only — does **not** prove the real Bedrock Guardrail service would actually block or anonymise anything) | `test/local-security.test.ts` "simulates a guardrail block" | The real guardrail decision — would a given prompt actually be blocked, would `EMAIL`/`PHONE` actually be anonymised — is NOT VERIFIED and can only be proven by a live call against a deployed guardrail |
+| IAM Least Privilege | `lib/bedrock-permissions.ts`, single-action grants | MOCK VERIFIED (synthesised policy document only — not a deployed, attached, or enforced role) | `test/infrastructure.test.ts` asserts the synthesised policy document | NOT VERIFIED that this is what's actually enforced by IAM at runtime — only that the CDK app, if deployed, would ask CloudFormation to create a role with this policy |
 | LLM Evaluation — Relevance | `evaluation/scorer.ts` | NOT VERIFIED | `evaluate:mock` — 5 `skipped` | No real model output exists in any local mode to judge |
-| LLM Evaluation — Groundedness | — | **NOT APPLICABLE / NOT IMPLEMENTED** | `evaluation/types.ts:3` — `Dimension` has no groundedness member | Not implemented in the harness; architecturally this service has no retrieval/context source to ground a response against |
-| LLM Evaluation — Prompt Injection | `evaluation/cases.json` C09/C10, `validation.ts` | **LOCALLY VERIFIED** (app layer) | `test/local-security.test.ts` — flag confirmed on the real persisted DynamoDB item | Confirms app-layer flagging only; does not confirm the model/guardrail itself declines |
-| LLM Evaluation — Sensitive Data Handling | `evaluation/cases.json` C11, `validation.ts` | **LOCALLY VERIFIED** (app layer) | `test/local-security.test.ts` | Same caveat as Prompt Injection |
+| LLM Evaluation — Groundedness | — | **NOT EVALUATED** | `evaluation/types.ts:3` — `Dimension` has no groundedness member | Groundedness *was* one of the dimensions A1 planned to assess for Goal 4 (relevance, groundedness, prompt injection, sensitive data, latency, failure behaviour). It was never evaluated because the harness never implemented a groundedness scorer — there is no `groundedness` member in the `Dimension` type, so no case has ever produced even a `skipped` verdict for it, let alone a `pass`. Separately, this architecture has no retrieval/context-grounding source (plain prompt→completion, not RAG), so even if a scorer existed, there is nothing obvious to check groundedness *against* without first adding a context/knowledge-base feature. Both facts are stated because the first one (never implemented) is a correctable gap and the second (no grounding source) is an architectural reason the gap was not trivial to close |
+| LLM Evaluation — Prompt Injection | `evaluation/cases.json` C09/C10, `validation.ts` | **LOCALLY VERIFIED (app-layer heuristic flagging only)** | `test/local-security.test.ts` — flag confirmed on the real persisted DynamoDB item | Confirms this application's own regex-based flagging only; does NOT confirm the real model or the real guardrail actually declines the request — that half requires a live call |
+| LLM Evaluation — Sensitive Data Handling | `evaluation/cases.json` C11, `validation.ts` | **LOCALLY VERIFIED (app-layer heuristic flagging only)** | `test/local-security.test.ts` | Same caveat as Prompt Injection |
 | LLM Evaluation — Latency (real model) | `evaluation/scorer.ts scoreLatency` | NOT VERIFIED | `evaluate:mock` — 8 `skipped`; 0–7ms mock figures explicitly not presented as real | No real model call made |
-| LLM Evaluation — Failure Behaviour | `evaluation/scorer.ts scoreOutcome` | **LOCALLY VERIFIED** | `test/local-security.test.ts` (whole file), `evaluate:mock` C05–C08/C13 | None of real significance — this dimension is now well-covered without any deployment |
-| LLM Evaluation — Guardrail Behaviour | `generate.ts` `ContentBlockedError` handling | MOCK VERIFIED (app layer, now against real persistence) | `test/local-security.test.ts` | The actual guardrail-triggering decision remains NOT VERIFIED locally |
-| CloudWatch / Observability | `logger.ts`, `CfnAlarm`/`Dashboard`, X-Ray `ACTIVE` | MOCK VERIFIED (config only) | `test/observability.test.ts`, `cdk synth` | NOT VERIFIED: no real CloudWatch log, metric, or trace was ever produced — there is no local CloudWatch emulator in use. Also note: this is AWS-native CloudWatch + X-Ray, not OpenTelemetry SDK instrumentation |
-| Automated Tests & CI/CD | Jest, 10 suites (8 original + 2 new) | **LOCALLY VERIFIED** | `npm test` — 173 tests, 171 passed, 2 documented skips | CI itself (`.github/workflows/validate.yml`) was not re-triggered this pass (no push made); its real green run history was confirmed in the prior deployment-readiness review |
-| Architecture Documentation & Portfolio Evidence | `docs/*.md` (3 new this pass) | NOT APPLICABLE (not code) | This file, `docs/local-validation-guide.md`, `docs/local-evaluation-report.md` | None |
+| LLM Evaluation — Failure Behaviour | `evaluation/scorer.ts scoreOutcome` | **LOCALLY VERIFIED** | `test/local-security.test.ts` (whole file), `evaluate:mock` C05–C08/C13 | None of real significance — this dimension is exercised through real handler code and (for the DynamoDB-failure case) a real `ResourceNotFoundException`, and is well-covered without any deployment |
+| LLM Evaluation — Guardrail Behaviour | `generate.ts` `ContentBlockedError` handling | MOCK VERIFIED (app-layer handling of a simulated response shape, now against real persistence — does **not** prove real guardrail-triggering behaviour) | `test/local-security.test.ts` | The actual guardrail-triggering decision remains NOT VERIFIED locally, same caveat as the Guardrails row above |
+| CloudWatch / Observability | `logger.ts`, `CfnAlarm`/`Dashboard`, X-Ray `ACTIVE` | MOCK VERIFIED (synthesised configuration only — no real telemetry was ever produced) | `test/observability.test.ts`, `cdk synth` | NOT VERIFIED: no real CloudWatch log, metric, or trace exists anywhere as a result of this project — there is no local CloudWatch emulator in use, and none was attempted. Also note: this is AWS-native CloudWatch + X-Ray, not OpenTelemetry SDK instrumentation |
+| Automated Tests & CI/CD | Jest, 10 suites (8 original + 2 new) | **LOCALLY VERIFIED (local test execution only — see "CI Verification" below for the actual GitHub Actions status)** | `npm test` — 173 tests, 171 passed, 2 documented skips, reproduced fresh on 2026-11-02 | CI (`.github/workflows/validate.yml`) has never run on this branch at all — not "skipped due to no database," but zero workflow runs exist for `feat/uts-a3-aws-evidence` in any form. See "CI Verification" below for the precise reason and evidence |
+| Architecture Documentation & Portfolio Evidence | `docs/architecture.md`, `docs/security.md`, `docs/evaluation.md`, `docs/evidence-guide.md`, `docs/professional-reflection.md`, `docs/deployment-readiness.md`, `docs/local-validation-guide.md`, `docs/local-evaluation-report.md`, `docs/uts-a3-p4-portfolio.md`, this file, `README.md` | **IMPLEMENTED** (the documentation itself is the evidence for this requirement — "not applicable" would misstate that) | All files listed in the Implementation column exist in this repository right now and are individually readable/linkable | None — this is the most completely covered requirement in the project |
+
+## CI Verification (checked precisely for this review, 2026-11-02)
+
+**Finding: GitHub Actions has never executed on `feat/uts-a3-aws-evidence` — zero runs,
+not a skip.** This is a more specific and more important finding than "CI skipped the
+DynamoDB-dependent tests," so it is stated on its own:
+
+1. `.github/workflows/validate.yml`'s trigger is:
+   ```yaml
+   on:
+     push:
+       branches: [main, 'feature/**']
+     pull_request:
+       branches: [main]
+     workflow_dispatch:
+   ```
+2. This repository's working branch for all of this A3 evidence work is
+   `feat/uts-a3-aws-evidence` — which matches **neither** `main` **nor** the glob
+   `feature/**` (it is `feat/`, not `feature/`). No pull request targeting `main` was
+   ever opened from this branch either, so the `pull_request` trigger never fired.
+3. Verified directly, read-only, this review:
+   ```
+   $ gh run list --repo krischuang/43030-aws-serverless-genai --branch feat/uts-a3-aws-evidence --limit 10
+   (no output — zero runs)
+   $ gh pr list --repo krischuang/43030-aws-serverless-genai --head feat/uts-a3-aws-evidence --state all
+   (no output — no PR ever opened)
+   ```
+
+**Consequence for every claim in this document and in `docs/local-evaluation-report.md`**:
+every test result, lint/typecheck pass, `cdk synth` success, and mock-evaluation run
+referenced anywhere in this review was executed **locally**, by direct command, not by
+CI. "Automated Tests & CI/CD" above is therefore marked `LOCALLY VERIFIED`, not
+`CI VERIFIED` — and must not be described as "CI integration tests passed," because CI
+never ran them at all.
+
+**What this does *not* affect**: `validate.yml` previously ran successfully against
+`main` and `feature/serverless-genai-portfolio` before this branch existed (confirmed by
+`gh run list` in the prior deployment-readiness review on 2026-11-01) — that history is
+real and unaffected by this finding. It simply does not extend to anything committed on
+`feat/uts-a3-aws-evidence`, including the new `test/local-*.test.ts` files, which have
+never been run by any CI system, only by this review's own local `npm test`/
+`npm run test:local` commands.
+
+**If this branch is later merged into `main` or `feature/**`**, `validate.yml` would run
+`npm test`, which would execute `test/local-integration.test.ts` and
+`test/local-security.test.ts` on a GitHub-hosted runner with no DynamoDB Local container
+provisioned (the workflow has no `services:` block for it). Those two files' own
+reachability guard (`isDynamoDbLocalReachable()`) would then make them skip cleanly —
+consistent with their designed behaviour verified locally in this review — but this
+would still correctly be reported as **CI ran, local-DynamoDB tests skipped**, not
+**CI integration tests passed**, unless a future change adds a `services: dynamodb-local:
+...` block to the workflow to actually provision the container in CI.
+
+## Reproducible Evidence Log (final P4 review, re-run fresh on 2026-11-02)
+
+Every command below was re-executed during this review, not copied from a prior pass.
+Commit reference for the state these numbers describe: `cfd60c7` (branch
+`feat/uts-a3-aws-evidence`, pushed).
+
+**Lint**
+```
+$ npm run lint
+> eslint .
+(no output — zero errors, zero warnings)
+```
+
+**Typecheck**
+```
+$ npm run typecheck
+> tsc --noEmit
+(no output — zero errors)
+```
+
+**Full test suite, DynamoDB Local unreachable (container not yet started)**
+```
+$ npm test
+Test Suites: 2 skipped, 8 passed, 8 of 10 total
+Tests:       20 skipped, 155 passed, 175 total
+```
+
+**Full test suite, DynamoDB Local reachable (`npm run dynamodb:local:up` first)**
+```
+$ npm test
+Test Suites: 10 passed, 10 total
+Tests:       2 skipped, 171 passed, 173 total
+```
+The 2 skips here are the two deliberate documentation-only `it.skip` entries in
+`test/local-security.test.ts` (Unauthorized Request Handling; real Guardrail
+filter/anonymisation behaviour) — not failures, and not affected by DynamoDB Local's
+availability.
+
+**Local integration + security suite in isolation**
+```
+$ npx jest --runInBand test/local-integration.test.ts test/local-security.test.ts
+Test Suites: 2 passed, 2 total
+Tests:       2 skipped, 16 passed, 18 total
+```
+
+**DynamoDB Local — what was actually verified**: real `CreateTableCommand`,
+`PutCommand`, `GetCommand`, `DeleteTableCommand` against `amazon/dynamodb-local:latest`
+running in Docker (`docker run ... -jar DynamoDBLocal.jar -sharedDb -inMemory`); real
+`ConditionExpression` rejection on a duplicate `requestId` write; real
+`ResourceNotFoundException` when addressing a table that was never created. None of this
+touches AWS Cloud DynamoDB.
+
+**CDK synth (fully offline)**
+```
+$ CDK_DEFAULT_ACCOUNT=000000000000 CDK_DEFAULT_REGION=ap-southeast-2 npx cdk synth --quiet
+(exit code 0; 26 feature flags not configured — informational only)
+```
+Resource inventory extracted from the synthesised template (unchanged from the prior
+review, re-verified): 2 `AWS::Lambda::Function`, 1 `AWS::DynamoDB::Table`, 1
+`AWS::ApiGateway::RestApi` (+2 methods, 1 validator, 1 model), 1 `AWS::Bedrock::Guardrail`
++ 1 `GuardrailVersion`, 2 `AWS::CloudWatch::Alarm`, 1 `AWS::CloudWatch::Dashboard`, 3
+`AWS::IAM::Role`, 2 `AWS::IAM::Policy`, 1 `AWS::SNS::Topic` (+1 `TopicPolicy`), 3
+`AWS::Logs::LogGroup`, 4 `AWS::Lambda::Permission`, 1 `AWS::ApiGateway::Account`/
+`Deployment`/`Stage` each, 1 `AWS::CDK::Metadata`.
+
+**Mock evaluation**
+```
+$ npm run evaluate:mock
+Cases with no failing dimension: 13/13
+Dimension checks: 20 pass, 0 fail, 16 skipped
+```
+Full per-case breakdown: `docs/local-evaluation-report.md`.
+
+**Dependency audit (production dependencies only)**
+```
+$ npm audit --omit=dev
+2 moderate severity vulnerabilities
+```
+Both are `minimatch`, bundled inside `aws-cdk-lib` itself with no upstream fix published
+yet — unchanged from the prior review, confirmed CDK/CLI-tooling-only (not bundled into
+deployed Lambda code).
+
+**Git commit references** (branch `feat/uts-a3-aws-evidence`, all pushed):
+
+| Commit | Subject |
+|---|---|
+| `187541a` | test: strengthen serverless GenAI validation |
+| `19f225f` | docs: add deployment readiness and A3 evidence mapping |
+| `8e87911` | test: add local DynamoDB integration and security test suite |
+| `cfd60c7` | docs: add zero-cost local validation guide and evaluation report |
 
 ## Evidence Matrix (original pass, 2026-11-01 — deployment-readiness review)
 
