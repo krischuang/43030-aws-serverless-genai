@@ -61,14 +61,76 @@ this repository.
 | LLM Evaluation — Failure Behaviour | `evaluation/scorer.ts scoreOutcome` | **LOCALLY VERIFIED** | `test/local-security.test.ts` (whole file), `evaluate:mock` C05–C08/C13 | None of real significance — this dimension is exercised through real handler code and (for the DynamoDB-failure case) a real `ResourceNotFoundException`, and is well-covered without any deployment |
 | LLM Evaluation — Guardrail Behaviour | `generate.ts` `ContentBlockedError` handling | MOCK VERIFIED (app-layer handling of a simulated response shape, now against real persistence — does **not** prove real guardrail-triggering behaviour) | `test/local-security.test.ts` | The actual guardrail-triggering decision remains NOT VERIFIED locally, same caveat as the Guardrails row above |
 | CloudWatch / Observability | `logger.ts`, `CfnAlarm`/`Dashboard`, X-Ray `ACTIVE` | MOCK VERIFIED (synthesised configuration only — no real telemetry was ever produced) | `test/observability.test.ts`, `cdk synth` | NOT VERIFIED: no real CloudWatch log, metric, or trace exists anywhere as a result of this project — there is no local CloudWatch emulator in use, and none was attempted. Also note: this is AWS-native CloudWatch + X-Ray, not OpenTelemetry SDK instrumentation |
-| Automated Tests & CI/CD | Jest, 10 suites (8 original + 2 new) | **LOCALLY VERIFIED (local test execution only — see "CI Verification" below for the actual GitHub Actions status)** | `npm test` — 173 tests, 171 passed, 2 documented skips, reproduced fresh on 2026-11-02 | CI (`.github/workflows/validate.yml`) has never run on this branch at all — not "skipped due to no database," but zero workflow runs exist for `feat/uts-a3-aws-evidence` in any form. See "CI Verification" below for the precise reason and evidence |
+| Automated Tests & CI/CD | Jest, 10 suites (8 original + 2 new); `.github/workflows/validate.yml` | **CI VERIFIED** (real GitHub Actions run, not just local execution — see "CI Verification" below) | Run [`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153), commit `5d92368`, conclusion `success`: `173 tests, 171 passed, 2 skipped` overall; `18 tests, 16 passed, 2 skipped` in the DynamoDB Local suite specifically | A GitHub Actions run is not an AWS deployment — no AWS account or credentials were used; this verifies the test/build pipeline, not that the service works against real AWS |
 | Architecture Documentation & Portfolio Evidence | `docs/architecture.md`, `docs/security.md`, `docs/evaluation.md`, `docs/evidence-guide.md`, `docs/professional-reflection.md`, `docs/deployment-readiness.md`, `docs/local-validation-guide.md`, `docs/local-evaluation-report.md`, `docs/uts-a3-p4-portfolio.md`, this file, `README.md` | **IMPLEMENTED** (the documentation itself is the evidence for this requirement — "not applicable" would misstate that) | All files listed in the Implementation column exist in this repository right now and are individually readable/linkable | None — this is the most completely covered requirement in the project |
 
-## CI Verification (checked precisely for this review, 2026-11-02)
+## CI Verification — RESOLVED (2026-11-02, final technical pass)
 
-**Finding: GitHub Actions has never executed on `feat/uts-a3-aws-evidence` — zero runs,
-not a skip.** This is a more specific and more important finding than "CI skipped the
-DynamoDB-dependent tests," so it is stated on its own:
+**This gap is now closed. GitHub Actions has executed on `feat/uts-a3-aws-evidence`, a
+DynamoDB Local service container ran inside the job, and the integration/security suite
+genuinely ran (not skipped) and passed.**
+
+- **Run**: [`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153)
+- **Commit**: `5d92368e4ec902c9ed9b209a9f5cf4ece400bd91` (`5d92368`)
+- **Branch**: `feat/uts-a3-aws-evidence`
+- **Trigger**: `push`
+- **Status / Conclusion**: `completed` / **`success`**
+- **Duration**: 2026-11-02T07:26:16Z → 2026-11-02T07:28:19Z (~2 minutes)
+
+**Job steps, all green**: Set up job → Initialize containers (DynamoDB Local) → Check
+out → Set up Node.js → Install dependencies → Lint → Type-check → **Wait for DynamoDB
+Local to be reachable** → Unit and infrastructure tests → **Verify DynamoDB Local
+integration tests actually ran (not silently skipped)** → CDK synth → Evaluation suite
+(mock transport) → Upload evaluation report → Upload DynamoDB Local integration test
+results → Stop containers → Complete job.
+
+**Test counts extracted directly from the run's own logs** (`gh run view 41406298153
+--log`), not copied from the local run:
+
+```
+Unit and infrastructure tests:
+  Test Suites: 10 passed, 10 total
+  Tests:       2 skipped, 171 passed, 173 total
+
+Verify DynamoDB Local integration tests actually ran (not silently skipped):
+  Test Suites: 2 passed, 2 total
+  Tests:       2 skipped, 16 passed, 18 total
+  passed: 16 failed: 0 skipped: 2 total: 18
+
+Evaluation suite (mock transport):
+  Cases with no failing dimension: 13/13
+  Dimension checks: 20 pass, 0 fail, 16 skipped
+```
+
+**These numbers are identical to the local run** (same session, same commit, DynamoDB
+Local container with the same image) — there was no discrepancy to investigate. The
+verification step's fail-fast logic was additionally confirmed locally in both
+directions before this push: it passes when DynamoDB Local is reachable (16 passed, 2
+skipped) and correctly exits non-zero when the container is stopped (would report 20
+skipped, which exceeds the 2-skip budget and fails the job) — see
+`.github/workflows/validate.yml`'s "Verify DynamoDB Local integration tests actually
+ran" step for the exact check.
+
+**What this means for every other status label in this document**: "Automated Tests &
+CI/CD" is now genuinely **CI VERIFIED**, not only `LOCALLY VERIFIED` — this is the one
+row in the matrix above that should be read as upgraded relative to its label (written
+before this fix); the label text itself was not re-edited a second time to avoid
+re-introducing drift between the table and this section, but the authoritative status is
+recorded here.
+
+**Important scope boundary, unaffected by this fix**: this is a GitHub Actions run, on
+GitHub-hosted infrastructure, using a free local Docker container. **No AWS account, no
+AWS credentials, and no real AWS resource were involved.** This does not change anything
+about Amazon Bedrock, Amazon API Gateway, real AWS Cloud DynamoDB, or any other
+requirement in the matrix above that depends on an actual AWS deployment — all of those
+remain exactly as stated: `MOCK VERIFIED` or `NOT VERIFIED`, not `DEPLOYED`.
+
+### Prior finding (2026-11-02, before this fix — kept for the record)
+
+Before the workflow trigger and service-container fix above, GitHub Actions had never
+executed on `feat/uts-a3-aws-evidence` at all — zero runs, not a skip. This was a more
+specific and more important finding than "CI skipped the DynamoDB-dependent tests," so
+it was stated on its own at the time:
 
 1. `.github/workflows/validate.yml`'s trigger is:
    ```yaml
@@ -106,15 +168,11 @@ real and unaffected by this finding. It simply does not extend to anything commi
 never been run by any CI system, only by this review's own local `npm test`/
 `npm run test:local` commands.
 
-**If this branch is later merged into `main` or `feature/**`**, `validate.yml` would run
-`npm test`, which would execute `test/local-integration.test.ts` and
-`test/local-security.test.ts` on a GitHub-hosted runner with no DynamoDB Local container
-provisioned (the workflow has no `services:` block for it). Those two files' own
-reachability guard (`isDynamoDbLocalReachable()`) would then make them skip cleanly —
-consistent with their designed behaviour verified locally in this review — but this
-would still correctly be reported as **CI ran, local-DynamoDB tests skipped**, not
-**CI integration tests passed**, unless a future change adds a `services: dynamodb-local:
-...` block to the workflow to actually provision the container in CI.
+*(At the time this was written, the workflow had no `services:` block for DynamoDB
+Local, so even a correctly-triggered run would only have reached "CI ran, local-DynamoDB
+tests skipped," not "CI integration tests passed." That gap was closed the same day —
+see the "RESOLVED" section above, which documents the actual fix and the real passing
+run that followed it.)*
 
 ## Reproducible Evidence Log (final P4 review, re-run fresh on 2026-11-02)
 
@@ -206,6 +264,9 @@ deployed Lambda code).
 | `19f225f` | docs: add deployment readiness and A3 evidence mapping |
 | `8e87911` | test: add local DynamoDB integration and security test suite |
 | `cfd60c7` | docs: add zero-cost local validation guide and evaluation report |
+| `179a544` | docs: correct evidence classification precision and verify CI status |
+| `e328dc3` | docs: add P4 portfolio evidence document |
+| `5d92368` | ci: run DynamoDB Local integration tests in GitHub Actions — verified by real run [`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153) |
 
 ## Evidence Matrix (original pass, 2026-11-01 — deployment-readiness review)
 

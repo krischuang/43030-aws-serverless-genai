@@ -479,10 +479,26 @@ report, and what the current results do and do not establish.
 
 ## 14. CI/CD
 
-**`validate.yml`** runs on every push to `main` or `feature/**`, on pull requests, and on
-demand: `npm ci`, lint, type-check, the full test suite, `cdk synth` with placeholder
-account/region values, and the mock evaluation suite — whose report is uploaded as a
-build artifact. It needs no AWS credentials.
+**`validate.yml`** runs on every push to `main`, `feature/**`, or `feat/**`, on pull
+requests, and on demand: `npm ci`, lint, type-check, the full test suite, `cdk synth`
+with placeholder account/region values, and the mock evaluation suite — whose report is
+uploaded as a build artifact. It needs no AWS credentials.
+
+The job also starts a real `amazon/dynamodb-local` service container (AWS's own free,
+local-only DynamoDB-API-compatible engine — no AWS account, no cost) and waits for
+`localhost:8000` to be reachable before running the test suite, so
+`test/local-integration.test.ts` and `test/local-security.test.ts` (see §8) genuinely
+exercise real DynamoDB wire calls in CI, not just locally. A dedicated verification step
+re-runs those two files with `--json` and **fails the build** if more than the 2
+permanently-documented limitation skips occur or fewer than 16 of their tests pass —
+otherwise a container that failed to start would silently skip everything and still
+report green. Confirmed working both ways before this was relied upon: a real run
+([`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153),
+commit `5d92368`) passed with exactly `173 tests, 171 passed, 2 skipped` overall and
+`18 tests, 16 passed, 2 skipped` in the local-DynamoDB suite — matching local results
+exactly — and a local dry run with the container stopped confirmed the verification step
+correctly exits non-zero instead of passing. See `docs/uts-a3-goal4-evidence.md` for the
+full CI verification record.
 
 **`deploy.yml`** is `workflow_dispatch` only, and additionally requires the dispatcher to
 type `deploy` into a confirmation input. Deployment on every commit would make both cost

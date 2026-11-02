@@ -97,6 +97,7 @@ true.** Three layers of verification exist, each proving something different:
 | 155 fully-mocked unit/infrastructure tests (`test/*.test.ts`, pre-existing) | Application logic is correct against the exact inputs/outputs a mock is told to produce; the synthesised CloudFormation template has the expected shape | That a real DynamoDB/Bedrock call would actually succeed with that shape of request |
 | 18 local-DynamoDB tests added for this review (`test/local-integration.test.ts`, `test/local-security.test.ts`) | The real DynamoDB wire calls (`PutCommand`, `GetCommand`, `ConditionExpression`) are well-formed against a real DynamoDB-API-compatible engine (`amazon/dynamodb-local`), not just an obedient mock | Anything about AWS Cloud DynamoDB specifically (billing, replication, real latency) or about Amazon Bedrock, API Gateway, or IAM, none of which DynamoDB Local touches |
 | `cdk synth`, `evaluate:mock`, `npm audit` | The infrastructure-as-code is valid CloudFormation; the evaluation harness's own scoring logic is internally consistent; the production dependency tree has no unaddressed high-severity CVEs | Anything about what happens when this is actually deployed |
+| GitHub Actions (`validate.yml`, confirmed working 2026-11-02) | All of the above ran successfully on a neutral, GitHub-hosted runner, not just on the author's own machine — closing the gap between "it passes for me" and "it passes reproducibly." Includes a hard-fail check that the DynamoDB Local tests genuinely executed rather than silently skipping | Still not a deployment: no AWS account or credentials were used; this is a CI run on a free local container, not evidence about AWS Cloud DynamoDB, Bedrock, or API Gateway |
 
 **Current, reproduced-fresh-on-2026-11-02 numbers** (see
 `docs/uts-a3-goal4-evidence.md` "Reproducible Evidence Log" for the full command output):
@@ -110,6 +111,12 @@ true.** Three layers of verification exist, each proving something different:
   pass, 0 fail, 16 skip (skips are the dimensions — relevance, format, latency — that
   genuinely cannot be judged without a real model call, and are reported as `skipped`
   rather than faked as a pass).
+- **GitHub Actions run** [`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153)
+  (commit `5d92368`): `success`, reproducing the exact same numbers above on a
+  GitHub-hosted runner — `173 tests, 171 passed, 2 skipped` overall, and
+  `18 tests, 16 passed, 2 skipped` for the DynamoDB Local suite specifically, confirmed
+  by extracting the numbers directly from the run's own logs rather than assuming they
+  would match.
 
 **What none of the above proves, stated directly**: that this service works when
 actually deployed to AWS. No `cdk deploy` has ever succeeded against a real account (see
@@ -179,7 +186,13 @@ complete than it actually was. Two specific moments stand out:
    (`feature/**`). It would have been easy to write "CI confirms..." from memory of how
    CI behaved on a *different* branch in an *earlier* review pass. Catching this required
    actually running `gh run list` scoped to this exact branch, not assuming continuity
-   from a previous finding.
+   from a previous finding. Fixing it was its own small lesson in not overcorrecting:
+   the obvious fix (widen the trigger) was not sufficient on its own — a job that is
+   *triggered* but whose DynamoDB-dependent tests silently skip because no database was
+   provisioned would still read as green, so the fix had to include a container plus a
+   step that explicitly fails if the skip count is higher than the two permanent,
+   documented ones. I verified that failure path locally (stopped the container,
+   confirmed the verification step exits non-zero) before trusting the success path.
 
 Both moments reinforced the same lesson: in a security- and evidence-sensitive project,
 the discipline of re-checking a claim against the actual current state — rather than
@@ -204,7 +217,7 @@ in `docs/uts-a3-goal4-evidence.md`:
 | LLM Evaluation — Relevance, Prompt Injection, Sensitive Data, Latency, Failure Behaviour | Mixed — see the full matrix; Failure Behaviour is the strongest, Relevance/Latency are NOT VERIFIED |
 | LLM Evaluation — **Groundedness** | **NOT EVALUATED** — planned, but the harness never implemented a scorer for it |
 | CloudWatch / OpenTelemetry Observability | MOCK VERIFIED (config only; also: AWS-native CloudWatch+X-Ray, not OpenTelemetry SDK) |
-| Automated Tests and CI/CD | LOCALLY VERIFIED by direct execution; **CI itself has never run on this branch** |
+| Automated Tests and CI/CD | **CI VERIFIED** — real GitHub Actions run [`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153), `success`, 173 tests/171 passed/2 skipped, including a genuine DynamoDB Local run inside the job (not a skip) |
 | Architecture Documentation and Portfolio Evidence | **IMPLEMENTED** — this is the most complete area of the original plan |
 
 **The honest summary**: everything that can be verified without an AWS account has now
@@ -224,24 +237,25 @@ rejected local credential, not on missing design or code.
   way.
 - Groundedness has no scorer in the evaluation harness at all — a code-level gap, not a
   deployment gap, and the one genuinely "not started" item in the whole project.
-- CI (`validate.yml`) has never executed against any commit on this branch, for a
-  specific, fixable reason (the branch-name pattern doesn't match the trigger). This
-  means every "it still works" claim in this project currently rests on local execution
-  only.
+- ~~CI (`validate.yml`) has never executed against any commit on this branch~~ —
+  **resolved 2026-11-02**: the workflow trigger now includes `feat/**`, a DynamoDB Local
+  service container runs inside the job, and a dedicated verification step hard-fails
+  the build if the local-DynamoDB tests don't genuinely execute. Confirmed by a real,
+  successful run: [`#41406298153`](https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153).
+  This item is struck through rather than deleted so the before/after is visible.
 - API Gateway, the real Bedrock Guardrail's filtering/anonymisation decision, and real
   CloudWatch/X-Ray telemetry have never been exercised in any form — local or cloud —
-  because nothing in this project emulates API Gateway or Bedrock locally.
+  because nothing in this project emulates API Gateway or Bedrock locally. **CI running
+  successfully does not change this** — it is still a GitHub-hosted test run with no AWS
+  account involved, not a deployment.
 
 **Future development, in priority order:**
 
 1. Resolve the AWS credential and run a real `cdk deploy`, then capture the specific
    evidence items `docs/evidence-guide.md` already lists as "requires deployment" (E4–E10,
-   parts of E13/E15).
-2. Either rename this branch to match the CI trigger pattern or widen the workflow's
-   trigger so that future pushes here actually run CI — and, ideally, add a `services:`
-   block provisioning DynamoDB Local in CI so the new local-DynamoDB suite runs there too,
-   not just on a developer machine.
-3. Implement a groundedness scorer once (and only if) a retrieval/context feature exists
+   parts of E13/E15). This is now the only remaining item on the original future-work
+   list that is not yet done.
+2. Implement a groundedness scorer once (and only if) a retrieval/context feature exists
    for it to check against — adding one without a grounding source would just be a
    cosmetic metric.
 
@@ -254,11 +268,15 @@ own time constraints before the deadline favour a different sequence.]**
 All links point at the pushed, reviewable state of this branch.
 
 - **Branch**: `https://github.com/krischuang/43030-aws-serverless-genai/tree/feat/uts-a3-aws-evidence`
+- **GitHub Actions run (real CI, not local)**: `https://github.com/krischuang/43030-aws-serverless-genai/actions/runs/41406298153` — conclusion `success`, commit `5d92368`
 - **Commits referenced in this document**:
   - `https://github.com/krischuang/43030-aws-serverless-genai/commit/187541a`
   - `https://github.com/krischuang/43030-aws-serverless-genai/commit/19f225f`
   - `https://github.com/krischuang/43030-aws-serverless-genai/commit/8e87911`
   - `https://github.com/krischuang/43030-aws-serverless-genai/commit/cfd60c7`
+  - `https://github.com/krischuang/43030-aws-serverless-genai/commit/179a544`
+  - `https://github.com/krischuang/43030-aws-serverless-genai/commit/e328dc3`
+  - `https://github.com/krischuang/43030-aws-serverless-genai/commit/5d92368`
 - **Evidence documents** (all in this repository, this branch):
   - `docs/uts-a3-goal4-evidence.md` — the full per-requirement matrix and the CI finding
   - `docs/local-evaluation-report.md` — Pass/Fail/Skip/Not-Evaluated breakdown
