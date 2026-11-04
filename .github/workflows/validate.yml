@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - 'feature/**'
+      - 'feat/**'
   pull_request:
     branches:
       - main
@@ -22,6 +23,20 @@ jobs:
     name: Lint, type-check, test and synth
     runs-on: ubuntu-latest
     timeout-minutes: 15
+
+    # amazon/dynamodb-local is AWS's own free, local-only DynamoDB-API-compatible
+    # engine -- no AWS account, no AWS credentials, no cost. GitHub Actions starts
+    # this as a sidecar alongside the job (not a separate job), reachable at
+    # localhost:8000 because `ports` maps the container port to the same value on
+    # the runner host. test/local-dynamodb-helper.ts's isDynamoDbLocalReachable()
+    # probes exactly that address.
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+        options: >-
+          --name dynamodb-local
 
     steps:
       - name: Check out the repository
@@ -42,8 +57,63 @@ jobs:
       - name: Type-check
         run: npm run typecheck
 
+      # The amazon/dynamodb-local image has no HEALTHCHECK and no curl/shell
+      # tooling worth relying on for a Docker-level health check, so readiness
+      # is polled from the runner itself (which does have curl) instead of via
+      # the `services:` health-check options.
+      - name: Wait for DynamoDB Local to be reachable
+        run: |
+          for attempt in $(seq 1 30); do
+            http_status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 2 http://localhost:8000 || echo 000)
+            if [ "$http_status" != "000" ]; then
+              echo "DynamoDB Local is reachable after attempt $attempt (HTTP $http_status)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::DynamoDB Local did not become reachable on localhost:8000 within 60s" >&2
+          exit 1
+
       - name: Unit and infrastructure tests
         run: npm test
+
+      # npm test (above) runs every suite, including the local-DynamoDB
+      # integration/security tests -- but a suite that is entirely skipped
+      # still exits 0, which would let "DynamoDB Local never came up, so
+      # everything silently skipped" pass as a green build. This step re-runs
+      # just those two files with --json and asserts, with a hard failure, that
+      # they actually executed: no failures, no more than the 2 permanently
+      # documented limitation-skips (see test/local-security.test.ts), and at
+      # least the 16 tests known to pass when DynamoDB Local is genuinely up.
+      - name: Verify DynamoDB Local integration tests actually ran (not silently skipped)
+        run: |
+          npx jest --runInBand --json --outputFile=local-test-results.json \
+            test/local-integration.test.ts test/local-security.test.ts
+          node -e "
+            const r = require('./local-test-results.json');
+            const maxAllowedSkips = 2; // the two permanent, documented-limitation it.skip entries
+            const minExpectedPasses = 16;
+            console.log('passed:', r.numPassedTests, 'failed:', r.numFailedTests, 'skipped:', r.numPendingTests, 'total:', r.numTotalTests);
+            if (r.numFailedTests > 0) {
+              console.error('local-integration/local-security tests reported failures.');
+              process.exit(1);
+            }
+            if (r.numPendingTests > maxAllowedSkips) {
+              console.error(
+                'Expected at most ' + maxAllowedSkips + ' skipped tests (the documented ' +
+                'limitation entries), got ' + r.numPendingTests + '. DynamoDB Local was ' +
+                'probably unreachable -- that must fail CI, not be reported as a pass.'
+              );
+              process.exit(1);
+            }
+            if (r.numPassedTests < minExpectedPasses) {
+              console.error(
+                'Only ' + r.numPassedTests + ' tests passed, expected at least ' +
+                minExpectedPasses + '. Investigate before treating this as a pass.'
+              );
+              process.exit(1);
+            }
+          "
 
       # Synthesis uses placeholder environment values so that no AWS
       # credentials are required to prove the stack is valid CloudFormation.
@@ -62,5 +132,14 @@ jobs:
         with:
           name: evaluation-report-mock
           path: evidence/evaluation-mock.*
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload DynamoDB Local integration test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-integration-test-results
+          path: local-test-results.json
           if-no-files-found: warn
           retention-days: 14

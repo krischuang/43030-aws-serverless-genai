@@ -17,6 +17,7 @@ cdk-outputs.json
 # Test / coverage
 coverage/
 .jest-cache/
+local-test-results.json
 
 # Local evidence output may contain account-specific identifiers (account IDs,
 # API endpoints, ARNs) and is therefore never committed.
