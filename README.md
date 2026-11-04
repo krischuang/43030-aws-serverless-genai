@@ -616,5 +616,6 @@ The full reflection is in `docs/professional-reflection.md`.
 | `docs/professional-reflection.md` | Professional learning reflection |
 | `docs/deployment-readiness.md` | Pre-deployment checklist: IAM, Bedrock/Guardrail prerequisites, cost, rollback, diagnosed credential blocker |
 | `docs/uts-a3-goal4-evidence.md` | Per-requirement A1 Goal 4 evidence matrix (two review passes: deployment-readiness, then zero-cost local validation) |
+| `docs/uts-a3-goal4-verification-coverage-summary.md` | 8-section A3 P4 summary: goal, implemented components, verification method, actual results, evidence links, limitations, decisions, future validation plan |
 | `docs/local-validation-guide.md` | How to reproduce every test locally with zero AWS cost, including the DynamoDB Local setup and its safety design |
 | `docs/local-evaluation-report.md` | Pass/Fail/Skip evaluation summary produced entirely without a real AWS account |
